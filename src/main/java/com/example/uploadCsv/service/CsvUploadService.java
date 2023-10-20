@@ -2,17 +2,26 @@ package com.example.uploadCsv.service;
 
 import com.example.uploadCsv.entity.Customer;
 import com.example.uploadCsv.interfaces.CsvUploadInterface;
+import com.example.uploadCsv.repository.CustomerRepository;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStreamReader;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 
 @Service
 public class CsvUploadService implements CsvUploadInterface {
+
+    @Autowired
+    CustomerRepository customerRepository;
 
     public boolean isCSVFile(MultipartFile file) {
         String contentType = file.getContentType();
@@ -43,6 +52,45 @@ public class CsvUploadService implements CsvUploadInterface {
     }
 
 
+    public void saveDataInParallel(CopyOnWriteArrayList<Customer> dataToSave, int batchSize, int threadCount) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(threadCount);
+        executor.setMaxPoolSize(threadCount);
+        executor.initialize();
+
+        List<List<Customer>> dataBatches = splitIntoBatches(dataToSave, batchSize);
+        CountDownLatch latch = new CountDownLatch(dataBatches.size());
+
+        for (List<Customer> batch : dataBatches) {
+            executor.execute(() -> {
+                saveBatch(batch);
+                latch.countDown();
+            });
+        }
+
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        executor.shutdown();
+    }
+
+    private List<List<Customer>> splitIntoBatches(CopyOnWriteArrayList<Customer> data, int batchSize) {
+        List<List<Customer>> batches = new ArrayList<>();
+        for (int i = 0; i < data.size(); i += batchSize) {
+            int endIndex = Math.min(i + batchSize, data.size());
+            batches.add(data.subList(i, endIndex));
+        }
+        return batches;
+    }
+
+    private void saveBatch(List<Customer> dataBatch) {
+        customerRepository.saveAll(dataBatch);
+    }
+
     @Override
     public String uploadCsv(MultipartFile file) {
 
@@ -51,9 +99,8 @@ public class CsvUploadService implements CsvUploadInterface {
         if (isCsvFile) {
             CopyOnWriteArrayList<Customer> customers = convertCsvToCustomerList(file);
             if (customers.size() > 0) {
-
+                saveDataInParallel(customers, 1000, 10);
             }
-
             return "CSV file uploaded successfully.";
         } else {
             return "Please provide CSV file";
