@@ -99,7 +99,7 @@ public class CsvUploadService implements CsvUploadInterface {
         if (isCsvFile) {
             CopyOnWriteArrayList<Customer> customers = convertCsvToCustomerList(file);
             if (customers.size() > 0) {
-                saveDataInParallel(customers, 1000000, 10);
+                saveDataInParallel(customers, 1000, 10);
             }
             return "CSV file uploaded successfully.";
         } else {
